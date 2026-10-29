@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PQ aggregation: finality time and aggregator work</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-0: #ffffff; --surface-1: #ffffff; --border: #e6e6e6;
+  --text-primary: #111111; --text-secondary: #555555; --text-muted: #8a8a8a;
+  --grid: #efefef;
+  --series-1: #1f1f1f; --series-2: #b4b4b4;
+  --accent: #e5392b;
+  --warn: #c98500;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 300 14px/1.5 "Outfit", system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+::selection { background: #111; color: #fff; }
+b, strong, th { font-weight: 600; }
+input, select, button { font-family: inherit; }
+.viz-root { background: var(--surface-0); color: var(--text-primary); min-height: 100vh; }
+header { padding: 32px 28px 12px; }
+h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 8px; }
+h1::after { content: ""; display: block; width: 36px; height: 2px; background: var(--accent); margin-top: 10px; }
+h2 { font-size: 16px; font-weight: 600; margin: 0 0 10px; }
+h3 { font-size: 12px; font-weight: 400; margin: 18px 0 6px; color: var(--text-primary); text-transform: uppercase; letter-spacing: .1em; }
+.sub { color: var(--text-secondary); max-width: 900px; }
+.layout { display: grid; grid-template-columns: 420px 1fr; gap: 16px; padding: 12px 28px 40px; align-items: start; }
+#mobileBar { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: #111; color: #fff; padding: 10px 14px; font-size: 14px; border-top: 2px solid var(--accent); }
+#mobileBar b { font-weight: 600; }
+.main { min-width: 0; }
+.card { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; }
+.controls { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; overflow-x: hidden; }
+.ctl { display: grid; grid-template-columns: 1fr 104px; gap: 6px; align-items: center; margin: 5px 0; }
+.ctl label { color: var(--text-secondary); font-size: 13px; }
+.ctl label .info, h3 .info { margin-left: 5px; }
+.nowrap { white-space: nowrap; }
+.ctl:has(.seg) { grid-template-columns: 1fr 210px; }
+.tiers input::-webkit-inner-spin-button, .tiers input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.tiers input[type=number] { -moz-appearance: textfield; text-align: right; }
+.ctl:has(select) { grid-template-columns: 1fr 170px; }
+.ctl input[type=number] { text-align: right; }
+.ctl input[type=number], .ctl select { width: 100%; padding: 3px 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-0); color: var(--text-primary); font: inherit; font-size: 13px; }
+.ctl.wide { grid-template-columns: 1fr; }
+.range { display: grid; grid-template-columns: 1fr 104px; gap: 6px; align-items: center; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.seg button { flex: 1; border: 0; background: transparent; color: var(--text-secondary); padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: #fff; }
+.hint { color: var(--text-muted); font-size: 12px; margin: 2px 0 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+.tiers { table-layout: fixed; }
+.tiers input { width: 100%; box-sizing: border-box; padding: 2px 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-0); color: var(--text-primary); font: inherit; font-size: 12px; }
+.tiers td, .tiers th { padding: 2px 3px; font-size: 12px; }
+.tiers td.tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 34%; }
+.tiers th { font-size: 11px; line-height: 1.2; vertical-align: bottom; }
+.tiers td.vpn { color: var(--text-secondary); font-size: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+@media (max-width: 1300px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+.tile { position: relative; }
+.tile .v { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.info { position: absolute; top: 10px; right: 12px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--text-muted); color: var(--text-secondary); font: 600 12px/16px Georgia, serif; text-align: center; cursor: help; user-select: none; }
+.info.sm { position: static; display: inline-block; width: 15px; height: 15px; font-size: 10px; line-height: 13px; }
+#netDiagram .pick { cursor: pointer; outline: none; }
+#netDiagram .pick:focus-visible rect.frame { stroke-width: 3; }
+.info:hover, .info:focus { border-color: var(--accent); color: var(--accent); outline: none; }
+#tip { max-width: 360px; white-space: normal; line-height: 1.4; }
+.tile .l { color: var(--text-secondary); font-size: 13px; }
+.tile .d { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+.main > .card { margin-bottom: 16px; }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; }
+.sw-cpu { background: radial-gradient(circle, #fff 1.2px, transparent 1.4px) 0 0 / 5px 5px, radial-gradient(circle, #fff 1.2px, transparent 1.4px) 2.5px 2.5px / 5px 5px, var(--accent); }
+.sw-net { background: radial-gradient(circle, var(--accent) 1.2px, transparent 1.4px) 0 0 / 5px 5px, radial-gradient(circle, var(--accent) 1.2px, transparent 1.4px) 2.5px 2.5px / 5px 5px, #fff; box-shadow: inset 0 0 0 1px var(--accent); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+svg text { fill: var(--text-secondary); font-size: 11px; }
+#tip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); display: none; z-index: 10; }
+.warn { color: var(--warn); }
+.notes li { margin: 4px 0; color: var(--text-secondary); }
+a { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--accent); }
+a:hover { color: var(--accent); }
+input[type=range] { accent-color: var(--accent); }
+
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: 1fr; }
+  .controls { position: static; max-height: none; overflow: visible; }
+  #mobileBar { display: block; }
+  body { padding-bottom: 44px; }
+}
+@media (max-width: 600px) {
+  header { padding: 20px 14px 8px; }
+  h1 { font-size: 21px; }
+  .layout { padding: 8px 10px 24px; gap: 10px; }
+  .card { padding: 12px; }
+  .ctl { grid-template-columns: 1fr 88px; }
+  .ctl:has(.seg) { grid-template-columns: 1fr 170px; }
+  .ctl:has(select) { grid-template-columns: 1fr 150px; }
+  .range { grid-template-columns: 1fr 88px; }
+  .seg button { padding: 4px 6px; font-size: 12px; }
+  .tiles { gap: 8px; }
+  .tile .v { font-size: 22px; }
+  table { font-size: 12px; }
+  th, td { padding: 3px 4px; }
+}
+
+/* dropdowns: custom chevron with comfortable right padding */
+.ctl select { -webkit-appearance: none; -moz-appearance: none; appearance: none; padding: 4px 30px 4px 10px;
+  background: var(--surface-0) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23111' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center; cursor: pointer; }
+.ctl select:focus { outline: none; border-color: var(--accent); }
+header { position: relative; }
+#version { position: absolute; top: 28px; right: 28px; -webkit-appearance: none; -moz-appearance: none; appearance: none; padding: 5px 30px 5px 12px; border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 13px; color: var(--text-primary); cursor: pointer;
+  background: var(--surface-0) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23111' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center; }
+#version:focus { outline: none; border-color: var(--accent); }
+header h1 { padding-right: 150px; }
+@media (max-width: 700px) { #version { top: 18px; right: 14px; } header h1 { padding-right: 90px; } }
+</style>
+</head>
+<body class="viz-root">
+<header>
+  <select id="version" aria-label="Model version" onchange="location.href=this.value"><option value="/" selected>Model v1</option><option value="/v2/">Model v2</option></select>
+  <h1>PQ attestation aggregation: finality time and aggregator work</h1>
+  <div class="sub">Every validator votes at once; votes are proven into leaf proofs, merged up a tree, and folded into one block proof by several redundant stake-sampled folders, so the proposer is not a single point of failure: it only includes the first valid block proof it receives. Finality takes two such rounds. Aggregators are sampled by stake from all attesters. Tree shape and per-level redundancy are optimised for the inputs you set (or fixed manually). Draft model; see assumptions at the bottom.</div>
+</header>
+<div class="layout">
+  <aside class="card controls" id="controls">
+    <h3>Network<span class="info sm" id="netInfo" tabindex="0" data-tip="" aria-label="How network times are computed">i</span></h3>
+    <div class="ctl wide"><label>Propagation<span class="info sm" tabindex="0" data-tip="&lt;b&gt;How a proof travels to the next level of the tree.&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;b&gt;Gossip:&lt;/b&gt; the aggregator publishes on a topic and peers relay it (libp2p gossipsub). Robust and needs no addressing, but takes several relay hops, and every relay re-uploads the proof to D mesh peers.&lt;br&gt;&lt;br&gt;&lt;b&gt;Directed:&lt;/b&gt; parents are known in advance (they are sampled from stake), so the aggregator sends the proof straight to its r parent copies. One network hop, but one upload per parent copy.&lt;br&gt;&lt;br&gt;The final block proof is always gossiped to the whole network.">i</span> <span class="hint" style="margin:0">— click a box to choose</span></label></div>
+    <svg id="netDiagram" width="100%" role="img" aria-label="Gossip versus directed proof transfer"></svg>
+    <div class="ctl wide"><label>Network RTT (ms)<span class="info sm" tabindex="0" data-tip="<b>Network RTT</b>: round-trip time between two peers (distance, routing, processing), not counting transfer time; size ÷ bandwidth is added separately. One-way delay is ½ RTT.<br><br>How it is used: directed send = ½ RTT per hop; push gossip = ½ RTT per relay hop; announce &amp; pull = 1.5 RTT per hop (announce → request → data).<br><br>Reference: Anton Nashatyrev's simulations use 15–30 ms RTT within a region and up to 250 ms between far regions.">i</span></label><div class="range"><input type="range" id="h" min="0" max="600" step="10"><input type="number" id="h_n" min="0" max="600" step="10"></div></div>
+    <div class="ctl"><label>Gossip style<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Gossip style.&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;b&gt;Push&lt;/b&gt; (gossipsub default): each relay eagerly uploads the full message to its D mesh peers, most of whom often already have it. One link delay per hop, but D × size of upload per relay.&lt;br&gt;&lt;br&gt;&lt;b&gt;Announce &amp; pull&lt;/b&gt;: relays announce they have the message (tiny IHAVE-style notice), peers that lack it request it, and the relay sends it only to them. Three link delays per hop (announce, request, data) but each relay uploads only the copies actually pulled — about one on average. Trades latency for an ~D× cut in bandwidth. Applies to proofs; small messages such as signatures are always pushed.">i</span></label><div class="seg" id="gossipStyle"><button data-v="push">Push</button><button data-v="pull">Announce/pull</button></div></div>
+    <div class="ctl"><label>Copies served per relay per hop<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Copies served per relay per hop&lt;/b&gt; (announce &amp; pull only): how many peers pull the full message from a given relay on the critical path. Over a whole broadcast every node receives one copy, so the average is ~1; early relays in a fresh broadcast can be asked for more. Raise it for a more pessimistic estimate.">i</span></label><input type="number" id="pullServe" min="1" max="16" step="1"></div>
+    <div class="ctl"><label>Hops within a group topic<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Hops within a group topic&lt;/b&gt;: relay steps for messages that only need to reach one tree group (a subnet-like topic): signatures to leaf aggregators, proofs to the next level, roots to folders. ~3 hops. Each hop costs latency (½ RTT, or 1.5 RTT with announce &amp;amp; pull) plus re-uploading to D peers. Only used in Gossip mode.">i</span></label><input type="number" id="gossipHops" min="1" max="8" step="1"></div>
+    <div class="ctl"><label>Hops for network-wide broadcast<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Hops for a network-wide broadcast&lt;/b&gt;: relay steps to reach every node, ≈ log&lt;sub&gt;D&lt;/sub&gt;(nodes), so ~5 for ~10,000+ nodes with D = 8. Used for the final block-proof broadcast (both modes) and, in Gossip mode, for the block proof reaching the proposer.">i</span></label><input type="number" id="globalHops" min="1" max="10" step="1"></div>
+    <div class="ctl"><label>Gossip mesh degree D<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Mesh degree D&lt;/b&gt;: each gossipsub relay eagerly forwards a message to D peers (Ethereum uses D = 8). Upload time per hop = D × size ÷ upload bandwidth, which is why 230 KiB proofs are slow to gossip over 25 Mbps home uplinks. Only used in Gossip mode.">i</span></label><input type="number" id="meshD" min="1" max="16" step="1"></div>
+    <div class="ctl"><label>Signature dissemination per subnet (sigs/s)<span class="info sm" tabindex="0" data-tip="How many signatures one subnet topic can spread to its subscribers per second. Signature delivery to leaf aggregators takes (signatures per subnet ÷ this) on top of hop latency, so fewer, bigger subnets are slower. Default 1,000/s from Sukun: ~2 s to disseminate 2,000 signatures in one subnet. Gossip mode only.">i</span></label><input type="number" id="sigRate" min="1" step="100"></div>
+    <div class="ctl"><label>Backbone subnets per node<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Backbone subnets per node&lt;/b&gt;: long-lived subnet subscriptions each node keeps regardless of its duties (today SUBNETS_PER_NODE = 2, chosen from the node ID). Nodes also join extra subnets temporarily when one of their validators has a duty there (publishing a signature, aggregating), so they can be in many more than this at any moment.&lt;br&gt;&lt;br&gt;The model only uses this number for mesh health: the stable backbone sets the guaranteed nodes per subnet (total nodes × this ÷ subnets), which must stay above the minimum below. Duty-driven subscribers come and go and are not counted.">i</span></label><input type="number" id="subsPerNode" min="1" step="1"></div>
+    <div class="ctl"><label>Min nodes per subnet<span class="info sm" tabindex="0" data-tip="Smallest subnet topic considered healthy (mesh fill, eclipse resistance). Caps the number of subnets at total nodes × backbone subnets per node ÷ this. Leaf groups are not capped: a subnet can be split into several leaf groups.">i</span></label><input type="number" id="minMesh" min="1" step="5"></div>
+
+    <h3>Validators</h3>
+    <div class="ctl wide"><label>Validator set size N</label><div class="range"><input type="range" id="logN" min="4" max="6.3" step="0.05"><input type="number" id="N" step="1000"></div></div>
+    <div class="ctl"><label>Rounds to finality</label><div class="seg" id="roundsSeg"><button data-v="1">1 round</button><button data-v="2">2 rounds</button></div></div>
+    <div class="ctl"><label>CPU share for aggregation (%)<span class="info sm" tabindex="0" data-tip="Fraction of each node&#x27;s threads available to aggregation; the rest stays free for attesting, block processing, etc.">i</span></label><input type="number" id="cpuShare" min="5" max="100" step="5"></div>
+    <div class="ctl"><label>Bandwidth share for aggregation (%)<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Bandwidth share for aggregation&lt;/b&gt;: fraction of each node&#x27;s upload and download left for aggregation traffic. The rest goes to other duties: execution payloads and blobs (in Anton Nashatyrev&#x27;s gossip simulations the bulk-data burst keeps a 50/25 Mbps link fully busy from ~1.2 s to ~3 s of each slot), FFG/goldfish votes and aggregates (~29–73 MB inbound per slot at the home tier), and gossip overhead. Applied uniformly to all tiers.">i</span></label><input type="number" id="bwShare" min="5" max="100" step="5"></div>
+    <div class="ctl"><label>Total nodes<span class="info sm" tabindex="0" data-tip="Total number of beacon nodes running validators. Together with N and the max stake per node, it constrains how stake can be split across hardware tiers: each tier&#x27;s validators per node = its stake share × N ÷ (its node share × total nodes), which cannot exceed the cap.">i</span></label><input type="number" id="totalNodes" min="1" step="100"></div>
+    <div class="ctl wide"><label>Hardware tiers<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Hardware tiers.&lt;/b&gt; %: share of total stake. thr: CPU threads per node (the share below is given to aggregation). up/down: Mbps. Upload limits sending proofs (directed: copies × size; gossip: D × size per hop); download limits receiving signatures at leaves and child proofs at merges. val/node: validators (32 ETH each) per node, capped by max stake per node.">i</span></label></div>
+    <div class="hint">Share of nodes, share of stake, threads, upload/download Mbps. Validators per node is derived. Defaults loosely follow EIP-7870; the mix is a guess, edit it.</div>
+    <table class="tiers" id="tiers"></table>
+    <div class="hint" id="tierNote"></div>
+    <div class="ctl"><label>Max stake per node (ETH, 0 = none)<span class="info sm" tabindex="0" data-tip="Validators per node are capped at this ÷ 32 ETH (e.g. 4,096 ETH = 128 validators, the PeerDAS supernode threshold). 0 = no cap.">i</span></label><input type="number" id="maxStakeETH" step="32"></div>
+    <div class="ctl"><label>Proposer download tier</label><select id="proposerTier"></select></div>
+
+    <h3>Prover</h3>
+    <div class="ctl"><label>Calibration</label><select id="preset"><option value="oct">leanVM site, Oct 15</option><option value="may">May 2026 build</option><option value="kamil">Kamil ballpark, Oct 15</option></select></div>
+    <div class="ctl"><label>Verification per proof (ms)<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Verification per proof&lt;/b&gt;: time to check one leanVM proof. The leanVM benchmarks measure ~3–4 ms at 8–16 threads (up to ~11 ms single-threaded for a 4→1 merge proof). Added wherever a proof is checked: k × this before each merge, once per root at the folders, once at the proposer, and once per gossip hop (relays validate before forwarding).">i</span></label><input type="number" id="verifyMs" min="0" step="0.5"></div>
+    <div class="ctl"><label>Proof size (KiB)<span class="info sm" tabindex="0" data-tip="Size of one leanVM proof sent between levels (EIP-8292 measures ~127–344 KiB; hard bound 512 KiB). Drives every transfer time.">i</span></label><input type="number" id="proofKiB" step="10"></div>
+    <div class="ctl"><label>Signature size (KiB)<span class="info sm" tabindex="0" data-tip="Size of one XMSS signature collected at the leaves (EIP-8292: ~1.17 KiB for the leanVM instance; some models use 3 KiB).">i</span></label><input type="number" id="sigKiB" step="0.1"></div>
+    <div class="ctl"><label>Max signatures per leaf</label><input type="number" id="leafCap" step="50"></div>
+    <div class="ctl"><label>MAX_KEYS per root proof</label><input type="number" id="maxKeys" step="1024"></div>
+    <div class="ctl"><label>MAX_RECURSIONS (max fan-in)</label><input type="number" id="maxRec" step="1"></div>
+
+    <h3>Security</h3>
+    <div class="ctl"><label>Adversarial aggregator share q (%)<span class="info sm" tabindex="0" data-tip="Share of sampled aggregators that may withhold or delay their proofs. 33% matches the usual one-third adversary bound.">i</span></label><input type="number" id="q" min="0" max="90" step="1"></div>
+    <div class="ctl"><label>Honest offline / late (%)<span class="info sm" tabindex="0" data-tip="Share of honest aggregators that miss their job (offline, overloaded, late). A copy fails with probability q + (1 − q) × this.">i</span></label><input type="number" id="pOff" min="0" max="90" step="1"></div>
+    <div class="ctl"><label>Affordable vote loss β (%)<span class="info sm" tabindex="0" data-tip="Share of all votes the round may lose to failed aggregation and still be acceptable (e.g. the honest margin above the 2/3 finality threshold).">i</span></label><input type="number" id="beta" min="0.1" max="33" step="1"></div>
+    <div class="ctl"><label>Failure target ε<span class="info sm" tabindex="0" data-tip="Target probability that more than β of votes are lost in a round. Sets the minimum redundancy at each level and the number of folders.">i</span></label><select id="eps"><option value="0.001">10⁻³</option><option value="0.0001">10⁻⁴</option><option value="0.000001">10⁻⁶</option><option value="1e-9">10⁻⁹</option></select></div>
+
+    <h3>Tree shape</h3>
+    <div class="ctl"><label>Shape</label><div class="seg" id="shapeMode"><button data-v="auto">Optimise</button><button data-v="manual">Manual</button></div></div>
+    <div id="autoBox">
+      <div class="ctl"><label>Subnets<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Subnets&lt;/b&gt; = gossip topics that carry signatures (gossip mode). Each subnet can be split into several &lt;b&gt;leaf groups&lt;/b&gt;; a leaf proof covers one group, so leaf size = N ÷ (subnets × groups).&lt;br&gt;&lt;br&gt;&lt;b&gt;Optimise&lt;/b&gt;: the page picks the subnet count (up to the mesh-size cap) and the groups per subnet. &lt;b&gt;Fixed&lt;/b&gt;: you set the subnet count; groups, fan-in, depth and redundancy are still optimised. In directed mode there are no subnet topics and this sets the number of leaf groups.">i</span></label><div class="seg" id="subnetMode"><button data-v="auto">Optimise</button><button data-v="fixed">Fixed</button></div></div>
+      <div class="ctl"><label>Number of subnets</label><input type="number" id="subnets" min="1" step="1"></div>
+      <div class="ctl"><label>Optimise for</label><select id="objective"><option value="time">Finality time</option><option value="work">Work, s.t. T ≤ target</option></select></div>
+      <div class="ctl"><label>Finality target (s)</label><input type="number" id="tMax" step="1"></div>
+    </div>
+    <div class="ctl"><label>Level deadline (% of jobs done)<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Level deadline&lt;/b&gt;: each tree level closes once this share of its jobs has finished (at least one copy each). Jobs whose copies all landed on slow nodes are dropped: parents merge whatever arrived, and the dropped jobs&#x27; votes count as lost.&lt;br&gt;&lt;br&gt;Lower = faster levels, more votes lost to slow nodes. 100% = wait for every job. The dropped share is added to the expected vote loss, and the optimiser only picks shapes whose total expected loss stays within β.">i</span></label><input type="number" id="deadlinePct" min="50" max="100" step="1"></div>
+    <div id="manualBox">
+      <div class="ctl"><label>Leaf size s</label><input type="number" id="sManual" step="50"></div>
+      <div class="ctl"><label>Fan-in k</label><input type="number" id="kManual" step="1"></div>
+      <div class="ctl"><label>Merge levels L</label><input type="number" id="LManual" step="1"></div>
+    </div>
+    <div class="ctl"><label>Redundancy</label><div class="seg" id="rMode"><button data-v="auto">Optimise</button><button data-v="manual">Manual</button></div></div>
+    <div id="rBox">
+      <div class="ctl"><label>r leaves</label><input type="number" id="rLeaf" step="1"></div>
+      <div class="ctl"><label>r first merge level</label><input type="number" id="rMid" step="1"></div>
+      <div class="ctl"><label>r higher levels</label><input type="number" id="rTop" step="1"></div>
+    </div>
+
+    <div class="ctl"><label>Fold redundancy<span class="info sm" tabindex="0" data-tip="Stake-sampled folders each fold all root proofs into the block proof and send it to the proposer, who includes the first valid one. Losing every folder loses the round, so &quot;From ε&quot; sets folders so that P(all fail) ≤ ε/(L+2).">i</span></label><div class="seg" id="rFoldMode"><button data-v="auto">From ε</button><button data-v="manual">Manual</button></div></div>
+    <div class="ctl"><label>Folders</label><input type="number" id="rFold" min="1" max="64" step="1"></div>
+
+    <h3>Cost</h3>
+    <div class="ctl"><label>Round interval (s, 0 = back to back)<span class="info sm" tabindex="0" data-tip="&lt;b&gt;Round interval&lt;/b&gt;: how often a new aggregation round starts, in seconds. It only affects the cost figures (rounds per year → busy CPU-hours → $/yr), not finality time.&lt;br&gt;&lt;br&gt;&lt;b&gt;0 = back to back&lt;/b&gt;: a new round starts as soon as the previous one ends, the worst case for cost (~ one round every “round time” seconds, all year). Set e.g. 60 to model one round per minute: cost scales down proportionally.">i</span></label><input type="number" id="roundInterval" step="1"></div>
+    <div class="ctl"><label>Watts per busy thread</label><input type="number" id="wattsPerThread" step="1"></div>
+    <div class="ctl"><label>Electricity ($/kWh)</label><input type="number" id="pricekWh" step="0.01"></div>
+    <div class="ctl"><label>Cloud $ per thread-hour<span class="info sm" tabindex="0" data-tip="0.046 = GCP c4d-standard-16 on-demand ($0.74/h ÷ 16 vCPU, Oct 2026). Electricity is the marginal cost for spare capacity; cloud rental is an upper bound that includes the hardware.">i</span></label><input type="number" id="cloudPerThreadHour" step="0.001"></div>
+    <div class="ctl"><label>ETH price ($, input)</label><input type="number" id="ethPrice" step="100"></div>
+    <div class="ctl"><label>Staking yield (%)</label><input type="number" id="stakingYield" step="0.5"></div>
+    <p><button id="reset">Reset defaults</button></p>
+  </aside>
+
+  <main class="main">
+    <div class="tiles" id="tiles"></div>
+    <section class="card">
+      <h2>One round, phase by phase</h2>
+      <div class="legend"><span><span class="sw sw-cpu"></span>Compute</span><span><span class="sw sw-net"></span>Network</span></div>
+      <svg id="timeline" width="100%" height="120" role="img" aria-label="Timeline of one aggregation round"></svg>
+      <table id="phaseTable"></table>
+    </section>
+    <section class="card">
+      <h2>Tree</h2>
+      <div id="treeSummary" style="font-size:15px;margin:2px 0 6px"></div>
+      <div class="hint" id="treeHint"></div>
+      <div class="legend"><span><span class="sw" style="background:var(--series-1)"></span>Proof (one group; each is computed r times)</span><span><span class="sw" style="background:var(--accent)"></span>Proposer</span></div>
+      <svg id="treeSvg" width="100%" height="300" role="img" aria-label="Aggregation tree diagram"></svg>
+      <table id="treeTable"></table>
+    </section>
+    <section class="card">
+      <h2>Extra work and cost per node</h2>
+      <div id="costSummary" style="margin:2px 0 8px"></div>
+      <div class="hint">Work columns are per finality (all rounds); cost columns are per year. Jobs are assigned to validators by stake, so a node's load scales with the validators it runs. "Job time" is one job on that node at the CPU share above.</div>
+      <table id="nodeTable"></table>
+    </section>
+    <section class="card">
+      <h2>Finality time vs network RTT</h2>
+      <div class="hint">Each point re-optimises the shape (unless manual). The marker is the current setting.</div>
+      <div class="legend" id="sensLegend"></div>
+      <svg id="sens" width="100%" height="260" role="img" aria-label="Finality time versus network RTT"></svg>
+    </section>
+    <section class="card notes">
+      <h2>Model and assumptions</h2>
+      <ul>
+        <li><b>Work unit.</b> 1 AWU = proving one 100-signature leaf on one thread (1.005 s, Xeon Gold 6548N). Leaf time is linear in signatures (only 100 is measured). Merge time is a + b·k, fit to the 2→1 and 4→1 runs; thread scaling is interpolated between 1, 4, 8, 16 threads.</li>
+        <li><b>Rounds.</b> Each round: signatures reach leaf aggregators, leaves are proven, proofs move up L merge levels, roots reach r stake-sampled folders who each fold them into the block proof (fan-in ≤ MAX_RECURSIONS) and send it to the proposer, who includes the first valid one; the block proof is then gossiped. The proposer is no longer a single point of failure for the fold; it should not be bound to one proposer, so the next proposer can include the same proof. Levels do not overlap. Finality = rounds × round time.</li>
+        <li><b>Sampling and stragglers.</b> Each job is given to r validators drawn by stake. A level closes when the deadline share of its jobs (default 95%) has a finished copy; jobs whose copies all sit on slower nodes are dropped and their votes counted as lost. Nodes holding several jobs at once run them back to back.</li>
+        <li><b>Redundancy.</b> A copy fails with probability q + (1−q)·offline. Per-level r is chosen by dynamic programming over a split of the loss budget β, so that each level's binomial tail ≤ ε/(L+1), minimising work. "Loss bound" is the union bound over levels with the chosen budget split (for manual redundancy, an even split).</li>
+        <li><b>Cost.</b> Per node: busy thread-seconds per round × rounds per year, priced either as electricity (watts per busy thread × $/kWh) or as rented cloud thread-hours. Nodes per tier = stake share × N ÷ validators per node. $/ETH/yr divides a node's cost by the stake it runs; with stake-proportional sampling it differs across tiers only through hardware efficiency.</li>
+        <li><b>Bandwidth.</b> Each tier's upload and download are multiplied by the bandwidth share (default 20%) to leave room for payloads, blobs, votes and gossip overhead. This is a flat share; it does not model when bulk-data bursts happen relative to aggregation.</li>
+        <li><b>Verification.</b> Each proof check costs the verification time (default 3.5 ms, leanVM benchmarks): k checks before every merge, one per root at each folder, one at the proposer, and one per gossip hop for relays.</li>
+        <li><b>Not modelled.</b> Overlap between levels, gossip duplicates beyond D, CPU contention with attesting, signature verification by non-aggregators, picking up missed votes in the next round.</li>
+        <li><b>Sources.</b> <a href="https://leanethereum.github.io/leanVM/">leanVM benchmarks</a>; <a href="https://eips.ethereum.org/EIPS/eip-8292">EIP-8292</a> (proof ~230 KiB, 1 s propagation target); <a href="https://eips.ethereum.org/EIPS/eip-7870">EIP-7870</a> (hardware tiers); Anton Nashatyrev's <a href="https://github.com/Nashatyrev/jvm-libp2p/blob/45a0cab3e8d57c7a1d1dd8048821ec63245a35de/dc-slot-traffic-snappy.md">gossip simulations</a>; PQ interop call #43 (Shadow: p95 block propagation ~2 s at 50 Mbps).</li>
+      </ul>
+    </section>
+  </main>
+</div>
+<div id="tip"></div>
+<div id="mobileBar"></div>
+<script src="model.js?v=1792102626"></script>
+<script src="app.js?v=1792102626"></script>
+</body>
+</html>
